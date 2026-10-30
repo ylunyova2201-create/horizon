@@ -13874,13 +13874,7 @@ impl ApplicationHandler for Game<'_> {
         );
 
         let edit = self.android_touch.center("edit", size);
-        android_touch_circle(
-            batch,
-            atlas,
-            edit,
-            23.0 * factor,
-            rgba(54, 65, 78, alpha),
-        );
+        android_touch_circle(batch, atlas, edit, 23.0 * factor, rgba(54, 65, 78, alpha));
         batch.text(
             atlas,
             if self.android_touch.editor {
