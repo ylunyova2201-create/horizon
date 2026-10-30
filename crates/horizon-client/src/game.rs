@@ -639,7 +639,6 @@ impl AndroidTouchControls {
     }
 }
 
-
 /// Build the one Winit event loop used by this client. Android must pass the
 /// Activity handle supplied to android_main; desktop platforms need no handle.
 fn create_event_loop(android_app: &AndroidAppHandle) -> std::result::Result<EventLoop<()>, EventLoopError> {
