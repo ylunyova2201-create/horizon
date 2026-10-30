@@ -329,6 +329,23 @@ type AndroidAppHandle = winit::platform::android::activity::AndroidApp;
 #[cfg(not(target_os = "android"))]
 type AndroidAppHandle = ();
 
+fn android_touch_circle(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    center: [f32; 2],
+    radius: f32,
+    color: u32,
+) {
+    let segments = 18;
+    for i in 0..segments {
+        let a = std::f32::consts::TAU * i as f32 / segments as f32;
+        let b = std::f32::consts::TAU * (i + 1) as f32 / segments as f32;
+        let p1 = [center[0] + a.cos() * radius, center[1] + a.sin() * radius];
+        let p2 = [center[0] + b.cos() * radius, center[1] + b.sin() * radius];
+        batch.fill_quad(atlas, [center, p1, p2, center], color);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum AndroidTouchTarget {
     Joystick,
@@ -574,7 +591,7 @@ impl AndroidTouchControls {
         self.stick = None;
         self.look_active = false;
         for contact in self.contacts.values() {
-            match contact.target {
+            match &contact.target {
                 AndroidTouchTarget::Joystick => {
                     let center = self.center("joystick", size);
                     let radius = 62.0 * self.layout.scale.clamp(0.65, 1.8);
@@ -13777,25 +13794,13 @@ impl ApplicationHandler for Game<'_> {
         let factor = self.android_touch.layout.scale.clamp(0.65, 1.8);
         let alpha = (self.android_touch.layout.opacity.clamp(0.25, 0.95) * 255.0) as u8;
 
-        let mut circle = |center: [f32; 2], radius: f32, color: u32| {
-            let segments = 18;
-            for i in 0..segments {
-                let a = std::f32::consts::TAU * i as f32 / segments as f32;
-                let b = std::f32::consts::TAU * (i + 1) as f32 / segments as f32;
-                let p1 = [center[0] + a.cos() * radius, center[1] + a.sin() * radius];
-                let p2 = [center[0] + b.cos() * radius, center[1] + b.sin() * radius];
-                batch.fill_quad(
-                    atlas,
-                    [center, p1, p2, center],
-                    color,
-                );
-            }
-        };
         let button = |batch: &mut HudBatch, name: &str, label: &str, target: AndroidTouchTarget| {
             let center = self.android_touch.center(name, size);
             let pressed = self.android_touch.pressed(&target);
             let radius = 25.0 * factor;
-            circle(
+            android_touch_circle(
+                batch,
+                atlas,
                 center,
                 radius,
                 rgba(
@@ -13805,7 +13810,7 @@ impl ApplicationHandler for Game<'_> {
                     alpha,
                 ),
             );
-            circle(center, radius + 2.0 * factor, rgba(230, 238, 248, alpha / 2));
+            android_touch_circle(batch, atlas, center, radius + 2.0 * factor, rgba(230, 238, 248, alpha / 2));
             let width = HudBatch::text_width(atlas, label);
             batch.text(
                 atlas,
@@ -13818,14 +13823,14 @@ impl ApplicationHandler for Game<'_> {
         };
 
         let joystick = self.android_touch.center("joystick", size);
-        circle(joystick, 59.0 * factor, rgba(25, 35, 46, alpha));
-        circle(joystick, 61.0 * factor, rgba(220, 232, 244, alpha / 2));
+        android_touch_circle(batch, atlas, joystick, 59.0 * factor, rgba(25, 35, 46, alpha));
+        android_touch_circle(batch, atlas, joystick, 61.0 * factor, rgba(220, 232, 244, alpha / 2));
         let stick = self.android_touch.stick.unwrap_or([0.0, 0.0]);
         let knob = [
             joystick[0] + stick[0] * 35.0 * factor,
             joystick[1] - stick[1] * 35.0 * factor,
         ];
-        circle(knob, 23.0 * factor, rgba(69, 111, 154, alpha));
+        android_touch_circle(batch, atlas, knob, 23.0 * factor, rgba(69, 111, 154, alpha));
 
         button(batch, "jump", "JUMP", AndroidTouchTarget::Jump);
         button(batch, "attack", "HIT", AndroidTouchTarget::Attack);
@@ -13852,7 +13857,7 @@ impl ApplicationHandler for Game<'_> {
         if self.android_touch.editor {
             for (name, label) in [("scale_up", "+"), ("scale_down", "-")] {
                 let center = self.android_touch.center(name, size);
-                circle(center, 20.0 * factor, rgba(77, 91, 108, alpha));
+                android_touch_circle(batch, atlas, center, 20.0 * factor, rgba(77, 91, 108, alpha));
                 batch.text(
                     atlas,
                     label,
