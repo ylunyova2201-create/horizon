@@ -5878,7 +5878,7 @@ impl Game<'_> {
             return Ok(());
         }
         let playing = self.screen == Screen::Playing && self.sleeping.is_none();
-        let held = |k| playing && self.keys.contains(&k);
+        let held = |k| playing && (self.keys.contains(&k) || self.android_touch.keys.contains(&k));
         let keys = Keys {
             forward: held(KeyCode::KeyW),
             backward: held(KeyCode::KeyS),
@@ -6377,7 +6377,10 @@ impl Game<'_> {
     fn apply_mouse_look(&mut self) {
         let look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
-        let pointer = self.captured || self.agent_pointer || self.android_touch.look_active;
+        let pointer = self.captured
+            || self.agent_pointer
+            || self.android_touch.look_active
+            || self.mouse.accumulated() != (0.0, 0.0);
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
         if let Some((xo, yo)) = self
@@ -13841,7 +13844,9 @@ impl ApplicationHandler for Game<'_> {
         button(batch, "perspective", "VIEW", AndroidTouchTarget::Perspective);
 
         let edit = self.android_touch.center("edit", size);
-        circle(
+        android_touch_circle(
+            batch,
+            atlas,
             edit,
             23.0 * factor,
             rgba(54, 65, 78, alpha),
