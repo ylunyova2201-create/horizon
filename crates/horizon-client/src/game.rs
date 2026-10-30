@@ -488,12 +488,23 @@ impl AndroidTouchControls {
             if within("scale_down", 24.0) {
                 return AndroidTouchTarget::ScaleDown;
             }
-            for name in ["jump", "attack", "use", "sneak", "sprint", "inventory", "perspective"] {
+            for name in ["joystick", "jump", "attack", "use", "sneak", "sprint", "inventory", "perspective"] {
                 if within(name, 32.0) {
                     return AndroidTouchTarget::MoveButton(name.to_owned());
                 }
             }
         } else {
+            // Hit the visible vanilla hotbar before the broad left-side
+            // joystick region so the first slots remain independently tappable.
+            if p[1] >= size[1] - 52.0
+                && p[0] >= size[0] * 0.28
+                && p[0] <= size[0] * 0.72
+            {
+                let slot = (((p[0] - size[0] * 0.28) / (size[0] * 0.44)) * 9.0)
+                    .floor()
+                    .clamp(0.0, 8.0) as u8;
+                return AndroidTouchTarget::Hotbar(slot);
+            }
             if p[0] < size[0] * 0.34 && p[1] > size[1] * 0.52 {
                 return AndroidTouchTarget::Joystick;
             }
@@ -509,17 +520,6 @@ impl AndroidTouchControls {
                 if within(name, 29.0) {
                     return target;
                 }
-            }
-            // The vanilla hotbar remains visible; tapping one of its nine
-            // slots changes the same selected slot as the keyboard number row.
-            if p[1] >= size[1] - 52.0
-                && p[0] >= size[0] * 0.28
-                && p[0] <= size[0] * 0.72
-            {
-                let slot = (((p[0] - size[0] * 0.28) / (size[0] * 0.44)) * 9.0)
-                    .floor()
-                    .clamp(0.0, 8.0) as u8;
-                return AndroidTouchTarget::Hotbar(slot);
             }
         }
         AndroidTouchTarget::Look
