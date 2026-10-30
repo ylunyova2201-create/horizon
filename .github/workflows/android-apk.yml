@@ -47,7 +47,7 @@ jobs:
 
       - name: Build native Android package
         shell: bash
-        run: cargo apk build --package horizon-client --target aarch64-linux-android --release
+        run: cargo apk build --package horizon-client --no-default-features --features audio --target aarch64-linux-android --release
 
       - name: Locate and sign APK
         shell: bash
