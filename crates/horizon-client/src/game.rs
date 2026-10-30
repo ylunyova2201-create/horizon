@@ -13376,6 +13376,46 @@ impl ApplicationHandler for Game<'_> {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
             return;
         }
+        // Android touchscreens do not consistently produce mouse events. Route
+        // a single-finger tap through the existing cursor/click handling so the
+        // launcher and in-game menus remain usable on phones and tablets.
+        #[cfg(target_os = "android")]
+        if let WindowEvent::Touch { device_id, phase, location, .. } = &event {
+            let device_id = *device_id;
+            let phase = *phase;
+            let position = *location;
+            self.window_event(
+                event_loop,
+                id,
+                WindowEvent::CursorMoved { device_id, position },
+            );
+            match phase {
+                winit::event::TouchPhase::Started => {
+                    self.window_event(
+                        event_loop,
+                        id,
+                        WindowEvent::MouseInput {
+                            device_id,
+                            state: ElementState::Pressed,
+                            button: MouseButton::Left,
+                        },
+                    );
+                }
+                winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+                    self.window_event(
+                        event_loop,
+                        id,
+                        WindowEvent::MouseInput {
+                            device_id,
+                            state: ElementState::Released,
+                            button: MouseButton::Left,
+                        },
+                    );
+                }
+                winit::event::TouchPhase::Moved => {}
+            }
+            return;
+        }
         follow_keymap(&mut event);
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && let PhysicalKey::Code(key) = event.physical_key
