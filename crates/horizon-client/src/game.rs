@@ -488,7 +488,16 @@ impl AndroidTouchControls {
             if within("scale_down", 24.0) {
                 return AndroidTouchTarget::ScaleDown;
             }
-            for name in ["joystick", "jump", "attack", "use", "sneak", "sprint", "inventory", "perspective"] {
+            for name in [
+                "joystick",
+                "jump",
+                "attack",
+                "use",
+                "sneak",
+                "sprint",
+                "inventory",
+                "perspective",
+            ] {
                 if within(name, 32.0) {
                     return AndroidTouchTarget::MoveButton(name.to_owned());
                 }
@@ -496,10 +505,7 @@ impl AndroidTouchControls {
         } else {
             // Hit the visible vanilla hotbar before the broad left-side
             // joystick region so the first slots remain independently tappable.
-            if p[1] >= size[1] - 52.0
-                && p[0] >= size[0] * 0.28
-                && p[0] <= size[0] * 0.72
-            {
+            if p[1] >= size[1] - 52.0 && p[0] >= size[0] * 0.28 && p[0] <= size[0] * 0.72 {
                 let slot = (((p[0] - size[0] * 0.28) / (size[0] * 0.44)) * 9.0)
                     .floor()
                     .clamp(0.0, 8.0) as u8;
@@ -525,12 +531,7 @@ impl AndroidTouchControls {
         AndroidTouchTarget::Look
     }
 
-    fn begin(
-        &mut self,
-        id: u64,
-        position: [f32; 2],
-        size: [f32; 2],
-    ) -> Option<AndroidTouchTarget> {
+    fn begin(&mut self, id: u64, position: [f32; 2], size: [f32; 2]) -> Option<AndroidTouchTarget> {
         let target = self.hit_test(position, size);
         match target {
             AndroidTouchTarget::EditToggle => {
@@ -612,9 +613,15 @@ impl AndroidTouchControls {
                     self.stick = Some([x, y]);
                 }
                 AndroidTouchTarget::Look => self.look_active = true,
-                AndroidTouchTarget::Jump => { self.keys.insert(KeyCode::Space); }
-                AndroidTouchTarget::Sneak => { self.keys.insert(KeyCode::ShiftLeft); }
-                AndroidTouchTarget::Sprint => { self.keys.insert(KeyCode::ControlLeft); }
+                AndroidTouchTarget::Jump => {
+                    self.keys.insert(KeyCode::Space);
+                }
+                AndroidTouchTarget::Sneak => {
+                    self.keys.insert(KeyCode::ShiftLeft);
+                }
+                AndroidTouchTarget::Sprint => {
+                    self.keys.insert(KeyCode::ControlLeft);
+                }
                 _ => {}
             }
         }
@@ -5843,7 +5850,8 @@ impl Game<'_> {
         let stick = self.pad_move().or(self.android_touch.stick);
         if self.riding.is_some() && self.player.is_some() {
             let playing = self.screen == Screen::Playing;
-            let held = |k| playing && (self.keys.contains(&k) || self.android_touch.keys.contains(&k));
+            let held =
+                |k| playing && (self.keys.contains(&k) || self.android_touch.keys.contains(&k));
             let keys = Keys {
                 forward: held(KeyCode::KeyW),
                 backward: held(KeyCode::KeyS),
@@ -13695,7 +13703,9 @@ impl ApplicationHandler for Game<'_> {
         phase: winit::event::TouchPhase,
         physical: [f32; 2],
     ) {
-        let Some(renderer) = self.renderer.as_ref() else { return; };
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
         let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
         let size = [batch.width, batch.height];
         let position = [physical[0] / batch.scale, physical[1] / batch.scale];
@@ -13762,16 +13772,13 @@ impl ApplicationHandler for Game<'_> {
                 self.android_touch.save();
             }
             winit::event::TouchPhase::Moved => {
-                if let Some((target, delta)) =
-                    self.android_touch.move_touch(finger, position, size)
+                if let Some((target, delta)) = self.android_touch.move_touch(finger, position, size)
                     && target == AndroidTouchTarget::Look
                 {
                     // Feeding the native mouse-look accumulator preserves
                     // sensitivity, inversion and pitch clamping.
-                    self.mouse.add_motion(
-                        f64::from(delta[0]) * 1.35,
-                        f64::from(delta[1]) * 1.35,
-                    );
+                    self.mouse
+                        .add_motion(f64::from(delta[0]) * 1.35, f64::from(delta[1]) * 1.35);
                 }
             }
             winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
@@ -13813,7 +13820,13 @@ impl ApplicationHandler for Game<'_> {
                     alpha,
                 ),
             );
-            android_touch_circle(batch, atlas, center, radius + 2.0 * factor, rgba(230, 238, 248, alpha / 2));
+            android_touch_circle(
+                batch,
+                atlas,
+                center,
+                radius + 2.0 * factor,
+                rgba(230, 238, 248, alpha / 2),
+            );
             let width = HudBatch::text_width(atlas, label);
             batch.text(
                 atlas,
@@ -13826,8 +13839,20 @@ impl ApplicationHandler for Game<'_> {
         };
 
         let joystick = self.android_touch.center("joystick", size);
-        android_touch_circle(batch, atlas, joystick, 59.0 * factor, rgba(25, 35, 46, alpha));
-        android_touch_circle(batch, atlas, joystick, 61.0 * factor, rgba(220, 232, 244, alpha / 2));
+        android_touch_circle(
+            batch,
+            atlas,
+            joystick,
+            59.0 * factor,
+            rgba(25, 35, 46, alpha),
+        );
+        android_touch_circle(
+            batch,
+            atlas,
+            joystick,
+            61.0 * factor,
+            rgba(220, 232, 244, alpha / 2),
+        );
         let stick = self.android_touch.stick.unwrap_or([0.0, 0.0]);
         let knob = [
             joystick[0] + stick[0] * 35.0 * factor,
@@ -13841,7 +13866,12 @@ impl ApplicationHandler for Game<'_> {
         button(batch, "sneak", "SNEAK", AndroidTouchTarget::Sneak);
         button(batch, "sprint", "RUN", AndroidTouchTarget::Sprint);
         button(batch, "inventory", "BAG", AndroidTouchTarget::Inventory);
-        button(batch, "perspective", "VIEW", AndroidTouchTarget::Perspective);
+        button(
+            batch,
+            "perspective",
+            "VIEW",
+            AndroidTouchTarget::Perspective,
+        );
 
         let edit = self.android_touch.center("edit", size);
         android_touch_circle(
@@ -13853,7 +13883,11 @@ impl ApplicationHandler for Game<'_> {
         );
         batch.text(
             atlas,
-            if self.android_touch.editor { "DONE" } else { "EDIT" },
+            if self.android_touch.editor {
+                "DONE"
+            } else {
+                "EDIT"
+            },
             edit[0] - 13.0,
             edit[1] - 4.0,
             rgba(255, 255, 255, 255),
@@ -13862,7 +13896,13 @@ impl ApplicationHandler for Game<'_> {
         if self.android_touch.editor {
             for (name, label) in [("scale_up", "+"), ("scale_down", "-")] {
                 let center = self.android_touch.center(name, size);
-                android_touch_circle(batch, atlas, center, 20.0 * factor, rgba(77, 91, 108, alpha));
+                android_touch_circle(
+                    batch,
+                    atlas,
+                    center,
+                    20.0 * factor,
+                    rgba(77, 91, 108, alpha),
+                );
                 batch.text(
                     atlas,
                     label,
@@ -13892,7 +13932,14 @@ impl ApplicationHandler for Game<'_> {
         // Native touch is split between existing menu clicks and the Android
         // multi-touch game controls. A contact has its own stable finger id.
         #[cfg(target_os = "android")]
-        if let WindowEvent::Touch { device_id, id: finger, phase, location, .. } = &event {
+        if let WindowEvent::Touch {
+            device_id,
+            id: finger,
+            phase,
+            location,
+            ..
+        } = &event
+        {
             self.android_touch_event(
                 event_loop,
                 id,
@@ -16476,10 +16523,7 @@ fn leave_fullscreen_after(
     }
 }
 
-fn run_event_loop(
-    mut game: Game<'_>,
-    android_app: &AndroidAppHandle,
-) -> Result<()> {
+fn run_event_loop(mut game: Game<'_>, android_app: &AndroidAppHandle) -> Result<()> {
     let result = create_event_loop(android_app)?.run_app(&mut game);
     leave_fullscreen_after(&result, &mut game.settings);
     result?;
@@ -16952,7 +16996,14 @@ fn run_with_android_app(android_app: AndroidAppHandle) -> Result<()> {
     // shared resources.
     Behaviours::set_cache_dir(std::env::current_dir()?.join(".horizon-cache"));
     if !synchronous_startup(&options) {
-        return run_loading(options, early_settings, vanilla_root, None, started, &android_app);
+        return run_loading(
+            options,
+            early_settings,
+            vanilla_root,
+            None,
+            started,
+            &android_app,
+        );
     }
     let mut pack_error = None;
     options.resources = packs::startup_root(&vanilla_root, &early_settings.resource_packs, &[])
