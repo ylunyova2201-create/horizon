@@ -148,7 +148,9 @@ impl SystemClipboard {
 impl Clipboard for SystemClipboard {
     fn get(&mut self) -> String {
         #[cfg(target_os = "android")]
-        { return self.copied.clone().unwrap_or_default(); }
+        {
+            return self.copied.clone().unwrap_or_default();
+        }
         #[cfg(not(target_os = "android"))]
         {
             let Some(system) = self.system() else {
@@ -165,7 +167,9 @@ impl Clipboard for SystemClipboard {
         }
     }
     fn set(&mut self, text: &str) {
-        if text.is_empty() { return; }
+        if text.is_empty() {
+            return;
+        }
         self.copied = Some(text.to_owned());
         #[cfg(not(target_os = "android"))]
         if let Some(system) = self.system()
