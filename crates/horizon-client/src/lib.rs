@@ -1,6 +1,9 @@
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
 
+// The client modules refer to their owning crate by its Cargo library name.
+extern crate self as horizon_client;
+
 /// Main game loop. Public for the Android NativeActivity entry point.
 pub mod game;
 
