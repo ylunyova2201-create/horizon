@@ -1,6 +1,8 @@
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
 
+#![deny(unsafe_code)]
+
 // The client modules refer to their owning crate by its Cargo library name.
 extern crate self as horizon_client;
 
@@ -42,7 +44,6 @@ pub fn android_main(app: winit::platform::android::activity::AndroidApp) {
         log::error!("Horizon Android: {error}");
     }
 }
-#![deny(unsafe_code)]
 pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;
