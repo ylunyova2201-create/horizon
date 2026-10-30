@@ -642,7 +642,7 @@ impl AndroidTouchControls {
 
 /// Build the one Winit event loop used by this client. Android must pass the
 /// Activity handle supplied to android_main; desktop platforms need no handle.
-fn create_event_loop(android_app: &AndroidAppHandle) -> Result<EventLoop<()>, EventLoopError> {
+fn create_event_loop(android_app: &AndroidAppHandle) -> std::result::Result<EventLoop<()>, EventLoopError> {
     let mut builder = EventLoop::builder();
     #[cfg(target_os = "android")]
     {
@@ -13647,52 +13647,6 @@ impl Game<'_> {
             }
         }
     }
-}
-impl ApplicationHandler for Game<'_> {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
-        }
-        // The Window constructor: created fullscreen when options.txt says so.
-        let fullscreen = self.settings.fullscreen;
-        let size = self.options.window_size.map(f64::from);
-        self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
-        let attributes = Window::default_attributes()
-            .with_title("Horizon")
-            .with_window_icon(horizon_client::window::icon());
-        // Wayland names the window by its app id, which the horizon.desktop entry matches.
-        #[cfg(target_os = "linux")]
-        let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
-            attributes, "horizon", "horizon",
-        );
-        let window = match event_loop.create_window(
-            attributes
-                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
-                .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None))),
-        ) {
-            Ok(w) => Arc::new(w),
-            Err(e) => {
-                self.error = Some(e.into());
-                event_loop.exit();
-                return;
-            }
-        };
-        horizon_client::telemetry::note_display(&window);
-        match self.new_renderer(window.clone()) {
-            Ok(r) => {
-                self.renderer = Some(r);
-                self.world_renderer_ready = true;
-            }
-            Err(e) => {
-                self.error = Some(e);
-                event_loop.exit();
-                return;
-            }
-        }
-        self.window = Some(window);
-        self.apply_settings();
-        self.previous = Instant::now();
-    }
     #[cfg(target_os = "android")]
     fn android_touch_event(
         &mut self,
@@ -13918,7 +13872,52 @@ impl ApplicationHandler for Game<'_> {
             );
         }
     }
-
+}
+impl ApplicationHandler for Game<'_> {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+        // The Window constructor: created fullscreen when options.txt says so.
+        let fullscreen = self.settings.fullscreen;
+        let size = self.options.window_size.map(f64::from);
+        self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
+        let attributes = Window::default_attributes()
+            .with_title("Horizon")
+            .with_window_icon(horizon_client::window::icon());
+        // Wayland names the window by its app id, which the horizon.desktop entry matches.
+        #[cfg(target_os = "linux")]
+        let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
+            attributes, "horizon", "horizon",
+        );
+        let window = match event_loop.create_window(
+            attributes
+                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
+                .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None))),
+        ) {
+            Ok(w) => Arc::new(w),
+            Err(e) => {
+                self.error = Some(e.into());
+                event_loop.exit();
+                return;
+            }
+        };
+        horizon_client::telemetry::note_display(&window);
+        match self.new_renderer(window.clone()) {
+            Ok(r) => {
+                self.renderer = Some(r);
+                self.world_renderer_ready = true;
+            }
+            Err(e) => {
+                self.error = Some(e);
+                event_loop.exit();
+                return;
+            }
+        }
+        self.window = Some(window);
+        self.apply_settings();
+        self.previous = Instant::now();
+    }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
             return;
@@ -13926,21 +13925,15 @@ impl ApplicationHandler for Game<'_> {
         // Native touch is split between existing menu clicks and the Android
         // multi-touch game controls. A contact has its own stable finger id.
         #[cfg(target_os = "android")]
-        if let WindowEvent::Touch {
-            device_id,
-            id: finger,
-            phase,
-            location,
-            ..
-        } = &event
+        if let WindowEvent::Touch(touch) = &event
         {
             self.android_touch_event(
                 event_loop,
                 id,
-                *device_id,
-                *finger,
-                *phase,
-                [location.x as f32, location.y as f32],
+                touch.device_id,
+                touch.id,
+                touch.phase,
+                [touch.location.x as f32, touch.location.y as f32],
             );
             return;
         }
@@ -17043,7 +17036,7 @@ fn run_with_android_app(android_app: AndroidAppHandle) -> Result<()> {
         None,
     )?;
     if let Some(game) = game {
-        run_event_loop(game, android_app)?;
+        run_event_loop(game, &android_app)?;
     }
     Ok(())
 }
