@@ -329,6 +329,293 @@ type AndroidAppHandle = winit::platform::android::activity::AndroidApp;
 #[cfg(not(target_os = "android"))]
 type AndroidAppHandle = ();
 
+#[derive(Clone, Debug, PartialEq)]
+enum AndroidTouchTarget {
+    Joystick,
+    Look,
+    Jump,
+    Sneak,
+    Sprint,
+    Attack,
+    Use,
+    Inventory,
+    Perspective,
+    Hotbar(u8),
+    EditToggle,
+    ScaleUp,
+    ScaleDown,
+    MoveButton(String),
+}
+
+#[derive(Clone)]
+struct AndroidTouchContact {
+    target: AndroidTouchTarget,
+    position: [f32; 2],
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct AndroidTouchLayout {
+    /// Normalized button centers, persisted independently of screen resolution.
+    centers: HashMap<String, [f32; 2]>,
+    scale: f32,
+    opacity: f32,
+}
+
+impl Default for AndroidTouchLayout {
+    fn default() -> Self {
+        Self {
+            centers: HashMap::new(),
+            scale: 1.0,
+            opacity: 0.72,
+        }
+    }
+}
+
+impl AndroidTouchLayout {
+    fn center(&self, name: &str, default: [f32; 2], size: [f32; 2]) -> [f32; 2] {
+        let normalized = self.centers.get(name).copied().unwrap_or(default);
+        [
+            normalized[0].clamp(0.02, 0.98) * size[0],
+            normalized[1].clamp(0.02, 0.98) * size[1],
+        ]
+    }
+
+    fn move_center(&mut self, name: &str, position: [f32; 2], size: [f32; 2]) {
+        self.centers.insert(
+            name.to_owned(),
+            [
+                (position[0] / size[0].max(1.0)).clamp(0.02, 0.98),
+                (position[1] / size[1].max(1.0)).clamp(0.02, 0.98),
+            ],
+        );
+    }
+}
+
+struct AndroidTouchControls {
+    contacts: HashMap<u64, AndroidTouchContact>,
+    keys: HashSet<KeyCode>,
+    stick: Option<[f32; 2]>,
+    look_active: bool,
+    editor: bool,
+    layout: AndroidTouchLayout,
+}
+
+impl Default for AndroidTouchControls {
+    fn default() -> Self {
+        Self {
+            contacts: HashMap::new(),
+            keys: HashSet::new(),
+            stick: None,
+            look_active: false,
+            editor: false,
+            layout: AndroidTouchLayout::default(),
+        }
+    }
+}
+
+impl AndroidTouchControls {
+    fn load() -> Self {
+        let layout = std::fs::read("android-controls.json")
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<AndroidTouchLayout>(&bytes).ok())
+            .unwrap_or_default();
+        Self {
+            layout,
+            ..Self::default()
+        }
+    }
+
+    fn save(&self) {
+        let Ok(bytes) = serde_json::to_vec_pretty(&self.layout) else {
+            return;
+        };
+        let temporary = "android-controls.json.tmp";
+        if std::fs::write(temporary, bytes).is_ok() {
+            let _ = std::fs::rename(temporary, "android-controls.json");
+        }
+    }
+
+    fn center(&self, name: &str, size: [f32; 2]) -> [f32; 2] {
+        let defaults = match name {
+            "joystick" => [0.14, 0.80],
+            "jump" => [0.90, 0.68],
+            "attack" => [0.72, 0.86],
+            "use" => [0.90, 0.86],
+            "sneak" => [0.53, 0.86],
+            "sprint" => [0.35, 0.86],
+            "inventory" => [0.90, 0.49],
+            "perspective" => [0.75, 0.49],
+            "edit" => [0.94, 0.10],
+            "scale_up" => [0.82, 0.10],
+            "scale_down" => [0.70, 0.10],
+            _ => [0.5, 0.5],
+        };
+        self.layout.center(name, defaults, size)
+    }
+
+    fn hit_test(&self, p: [f32; 2], size: [f32; 2]) -> AndroidTouchTarget {
+        let scale = self.layout.scale.clamp(0.65, 1.8);
+        let within = |name: &str, radius: f32| {
+            let c = self.center(name, size);
+            (p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) <= (radius * scale).powi(2)
+        };
+
+        if within("edit", 27.0) {
+            return AndroidTouchTarget::EditToggle;
+        }
+        if self.editor {
+            if within("scale_up", 24.0) {
+                return AndroidTouchTarget::ScaleUp;
+            }
+            if within("scale_down", 24.0) {
+                return AndroidTouchTarget::ScaleDown;
+            }
+            for name in ["jump", "attack", "use", "sneak", "sprint", "inventory", "perspective"] {
+                if within(name, 32.0) {
+                    return AndroidTouchTarget::MoveButton(name.to_owned());
+                }
+            }
+        } else {
+            if p[0] < size[0] * 0.34 && p[1] > size[1] * 0.52 {
+                return AndroidTouchTarget::Joystick;
+            }
+            for (name, target) in [
+                ("jump", AndroidTouchTarget::Jump),
+                ("attack", AndroidTouchTarget::Attack),
+                ("use", AndroidTouchTarget::Use),
+                ("sneak", AndroidTouchTarget::Sneak),
+                ("sprint", AndroidTouchTarget::Sprint),
+                ("inventory", AndroidTouchTarget::Inventory),
+                ("perspective", AndroidTouchTarget::Perspective),
+            ] {
+                if within(name, 29.0) {
+                    return target;
+                }
+            }
+            // The vanilla hotbar remains visible; tapping one of its nine
+            // slots changes the same selected slot as the keyboard number row.
+            if p[1] >= size[1] - 52.0
+                && p[0] >= size[0] * 0.28
+                && p[0] <= size[0] * 0.72
+            {
+                let slot = (((p[0] - size[0] * 0.28) / (size[0] * 0.44)) * 9.0)
+                    .floor()
+                    .clamp(0.0, 8.0) as u8;
+                return AndroidTouchTarget::Hotbar(slot);
+            }
+        }
+        AndroidTouchTarget::Look
+    }
+
+    fn begin(
+        &mut self,
+        id: u64,
+        position: [f32; 2],
+        size: [f32; 2],
+    ) -> Option<AndroidTouchTarget> {
+        let target = self.hit_test(position, size);
+        match target {
+            AndroidTouchTarget::EditToggle => {
+                self.editor = !self.editor;
+                return None;
+            }
+            AndroidTouchTarget::ScaleUp if self.editor => {
+                self.layout.scale = (self.layout.scale + 0.1).min(1.8);
+                return None;
+            }
+            AndroidTouchTarget::ScaleDown if self.editor => {
+                self.layout.scale = (self.layout.scale - 0.1).max(0.65);
+                return None;
+            }
+            _ => {}
+        }
+        self.contacts.insert(
+            id,
+            AndroidTouchContact {
+                target: target.clone(),
+                position,
+            },
+        );
+        self.refresh(size);
+        Some(target)
+    }
+
+    fn move_touch(
+        &mut self,
+        id: u64,
+        position: [f32; 2],
+        size: [f32; 2],
+    ) -> Option<(AndroidTouchTarget, [f32; 2])> {
+        let (target, delta) = {
+            let contact = self.contacts.get_mut(&id)?;
+            let delta = [
+                position[0] - contact.position[0],
+                position[1] - contact.position[1],
+            ];
+            contact.position = position;
+            (contact.target.clone(), delta)
+        };
+        if let AndroidTouchTarget::MoveButton(name) = &target {
+            self.layout.move_center(name, position, size);
+        }
+        self.refresh(size);
+        Some((target, delta))
+    }
+
+    fn end(&mut self, id: u64, size: [f32; 2]) -> Option<AndroidTouchTarget> {
+        let target = self.contacts.remove(&id)?.target;
+        self.refresh(size);
+        Some(target)
+    }
+
+    fn refresh(&mut self, size: [f32; 2]) {
+        self.keys.clear();
+        self.stick = None;
+        self.look_active = false;
+        for contact in self.contacts.values() {
+            match contact.target {
+                AndroidTouchTarget::Joystick => {
+                    let center = self.center("joystick", size);
+                    let radius = 62.0 * self.layout.scale.clamp(0.65, 1.8);
+                    let dx = (contact.position[0] - center[0]) / radius;
+                    let dy = (center[1] - contact.position[1]) / radius;
+                    let length = (dx * dx + dy * dy).sqrt();
+                    let factor = if length > 1.0 { 1.0 / length } else { 1.0 };
+                    let (mut x, mut y) = (dx * factor, dy * factor);
+                    let magnitude = (x * x + y * y).sqrt();
+                    if magnitude < 0.12 {
+                        x = 0.0;
+                        y = 0.0;
+                    } else {
+                        let adjusted = ((magnitude - 0.12) / 0.88).min(1.0) / magnitude;
+                        x *= adjusted;
+                        y *= adjusted;
+                    }
+                    self.stick = Some([x, y]);
+                }
+                AndroidTouchTarget::Look => self.look_active = true,
+                AndroidTouchTarget::Jump => { self.keys.insert(KeyCode::Space); }
+                AndroidTouchTarget::Sneak => { self.keys.insert(KeyCode::ShiftLeft); }
+                AndroidTouchTarget::Sprint => { self.keys.insert(KeyCode::ControlLeft); }
+                _ => {}
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.contacts.clear();
+        self.keys.clear();
+        self.stick = None;
+        self.look_active = false;
+    }
+
+    fn pressed(&self, target: &AndroidTouchTarget) -> bool {
+        self.contacts.values().any(|c| &c.target == target)
+    }
+}
+
+
 /// Build the one Winit event loop used by this client. Android must pass the
 /// Activity handle supplied to android_main; desktop platforms need no handle.
 fn create_event_loop(android_app: &AndroidAppHandle) -> Result<EventLoop<()>, EventLoopError> {
@@ -1620,6 +1907,8 @@ struct Game<'a> {
     /// The game mode; `creative` mirrors `mode == Creative`.
     mode: horizon_client::command::args::GameMode,
     keys: HashSet<KeyCode>,
+    /// Multi-touch controls and their editable, persistent Android layout.
+    android_touch: AndroidTouchControls,
     // Physical input is separate from remapped and toggled movement keys.
     physical_keys: HashSet<KeyCode>,
     physical_buttons: HashSet<MouseButton>,
@@ -5534,10 +5823,10 @@ impl Game<'_> {
         self.native_tick();
         self.tell_native_now();
         let camera_eye = self.camera_eye_height();
-        let stick = self.pad_move();
+        let stick = self.pad_move().or(self.android_touch.stick);
         if self.riding.is_some() && self.player.is_some() {
             let playing = self.screen == Screen::Playing;
-            let held = |k| playing && self.keys.contains(&k);
+            let held = |k| playing && (self.keys.contains(&k) || self.android_touch.keys.contains(&k));
             let keys = Keys {
                 forward: held(KeyCode::KeyW),
                 backward: held(KeyCode::KeyS),
@@ -6071,7 +6360,7 @@ impl Game<'_> {
     fn apply_mouse_look(&mut self) {
         let look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
-        let pointer = self.captured || self.agent_pointer;
+        let pointer = self.captured || self.agent_pointer || self.android_touch.look_active;
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
         if let Some((xo, yo)) = self
@@ -6390,6 +6679,10 @@ impl Game<'_> {
         } else {
             self.hud_layers(size)
         };
+        #[cfg(target_os = "android")]
+        if self.screen == Screen::Playing && self.player.is_some() {
+            self.draw_android_touch_controls(&mut batch);
+        }
         self.draw_dialog(&mut batch);
         self.draw_pack_prompt(&mut batch);
         self.draw_code_of_conduct(&mut batch);
@@ -13372,39 +13665,48 @@ impl ApplicationHandler for Game<'_> {
         self.apply_settings();
         self.previous = Instant::now();
     }
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
-        if self.window.as_ref().is_none_or(|w| w.id() != id) {
-            return;
-        }
-        // Android touchscreens do not consistently produce mouse events. Route
-        // a single-finger tap through the existing cursor/click handling so the
-        // launcher and in-game menus remain usable on phones and tablets.
-        #[cfg(target_os = "android")]
-        if let WindowEvent::Touch { device_id, phase, location, .. } = &event {
-            let device_id = *device_id;
-            let phase = *phase;
-            let position = *location;
+    #[cfg(target_os = "android")]
+    fn android_touch_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        device_id: DeviceId,
+        finger: u64,
+        phase: winit::event::TouchPhase,
+        physical: [f32; 2],
+    ) {
+        let Some(renderer) = self.renderer.as_ref() else { return; };
+        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let size = [batch.width, batch.height];
+        let position = [physical[0] / batch.scale, physical[1] / batch.scale];
+
+        // Menus and the launcher keep Horizon's original click/drag semantics.
+        if self.screen != Screen::Playing || self.player.is_none() {
             self.window_event(
                 event_loop,
-                id,
-                WindowEvent::CursorMoved { device_id, position },
+                window_id,
+                WindowEvent::CursorMoved {
+                    device_id,
+                    position: winit::dpi::PhysicalPosition::new(
+                        f64::from(physical[0]),
+                        f64::from(physical[1]),
+                    ),
+                },
             );
             match phase {
-                winit::event::TouchPhase::Started => {
-                    self.window_event(
-                        event_loop,
-                        id,
-                        WindowEvent::MouseInput {
-                            device_id,
-                            state: ElementState::Pressed,
-                            button: MouseButton::Left,
-                        },
-                    );
-                }
+                winit::event::TouchPhase::Started => self.window_event(
+                    event_loop,
+                    window_id,
+                    WindowEvent::MouseInput {
+                        device_id,
+                        state: ElementState::Pressed,
+                        button: MouseButton::Left,
+                    },
+                ),
                 winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
                     self.window_event(
                         event_loop,
-                        id,
+                        window_id,
                         WindowEvent::MouseInput {
                             device_id,
                             state: ElementState::Released,
@@ -13414,6 +13716,181 @@ impl ApplicationHandler for Game<'_> {
                 }
                 winit::event::TouchPhase::Moved => {}
             }
+            return;
+        }
+
+        match phase {
+            winit::event::TouchPhase::Started => {
+                if let Some(target) = self.android_touch.begin(finger, position, size) {
+                    match target {
+                        AndroidTouchTarget::Attack => {
+                            let _ = self.play_mouse(MouseButton::Left, true);
+                        }
+                        AndroidTouchTarget::Use => {
+                            let _ = self.play_mouse(MouseButton::Right, true);
+                        }
+                        AndroidTouchTarget::Inventory => {
+                            let _ = self.key_pressed(KeyCode::KeyE);
+                        }
+                        AndroidTouchTarget::Perspective => {
+                            let _ = self.key_pressed(KeyCode::F5);
+                        }
+                        AndroidTouchTarget::Hotbar(slot) => self.selected = slot as usize,
+                        _ => {}
+                    }
+                }
+                self.android_touch.save();
+            }
+            winit::event::TouchPhase::Moved => {
+                if let Some((target, delta)) =
+                    self.android_touch.move_touch(finger, position, size)
+                    && target == AndroidTouchTarget::Look
+                {
+                    // Feeding the native mouse-look accumulator preserves
+                    // sensitivity, inversion and pitch clamping.
+                    self.mouse.add_motion(
+                        f64::from(delta[0]) * 1.35,
+                        f64::from(delta[1]) * 1.35,
+                    );
+                }
+            }
+            winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+                if let Some(target) = self.android_touch.end(finger, size) {
+                    match target {
+                        AndroidTouchTarget::Attack => {
+                            let _ = self.play_mouse(MouseButton::Left, false);
+                        }
+                        AndroidTouchTarget::Use => {
+                            let _ = self.play_mouse(MouseButton::Right, false);
+                        }
+                        AndroidTouchTarget::MoveButton(_) => self.android_touch.save(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    fn draw_android_touch_controls(&self, batch: &mut HudBatch) {
+        let atlas = &self.gui.atlas;
+        let size = [batch.width, batch.height];
+        let factor = self.android_touch.layout.scale.clamp(0.65, 1.8);
+        let alpha = (self.android_touch.layout.opacity.clamp(0.25, 0.95) * 255.0) as u8;
+
+        let mut circle = |center: [f32; 2], radius: f32, color: u32| {
+            let segments = 18;
+            for i in 0..segments {
+                let a = std::f32::consts::TAU * i as f32 / segments as f32;
+                let b = std::f32::consts::TAU * (i + 1) as f32 / segments as f32;
+                let p1 = [center[0] + a.cos() * radius, center[1] + a.sin() * radius];
+                let p2 = [center[0] + b.cos() * radius, center[1] + b.sin() * radius];
+                batch.fill_quad(
+                    atlas,
+                    [center, p1, p2, center],
+                    color,
+                );
+            }
+        };
+        let button = |batch: &mut HudBatch, name: &str, label: &str, target: AndroidTouchTarget| {
+            let center = self.android_touch.center(name, size);
+            let pressed = self.android_touch.pressed(&target);
+            let radius = 25.0 * factor;
+            circle(
+                center,
+                radius,
+                rgba(
+                    if pressed { 46 } else { 27 },
+                    if pressed { 132 } else { 42 },
+                    if pressed { 214 } else { 56 },
+                    alpha,
+                ),
+            );
+            circle(center, radius + 2.0 * factor, rgba(230, 238, 248, alpha / 2));
+            let width = HudBatch::text_width(atlas, label);
+            batch.text(
+                atlas,
+                label,
+                center[0] - width / 2.0,
+                center[1] - 4.0,
+                rgba(255, 255, 255, 255),
+                true,
+            );
+        };
+
+        let joystick = self.android_touch.center("joystick", size);
+        circle(joystick, 59.0 * factor, rgba(25, 35, 46, alpha));
+        circle(joystick, 61.0 * factor, rgba(220, 232, 244, alpha / 2));
+        let stick = self.android_touch.stick.unwrap_or([0.0, 0.0]);
+        let knob = [
+            joystick[0] + stick[0] * 35.0 * factor,
+            joystick[1] - stick[1] * 35.0 * factor,
+        ];
+        circle(knob, 23.0 * factor, rgba(69, 111, 154, alpha));
+
+        button(batch, "jump", "JUMP", AndroidTouchTarget::Jump);
+        button(batch, "attack", "HIT", AndroidTouchTarget::Attack);
+        button(batch, "use", "USE", AndroidTouchTarget::Use);
+        button(batch, "sneak", "SNEAK", AndroidTouchTarget::Sneak);
+        button(batch, "sprint", "RUN", AndroidTouchTarget::Sprint);
+        button(batch, "inventory", "BAG", AndroidTouchTarget::Inventory);
+        button(batch, "perspective", "VIEW", AndroidTouchTarget::Perspective);
+
+        let edit = self.android_touch.center("edit", size);
+        circle(
+            edit,
+            23.0 * factor,
+            rgba(54, 65, 78, alpha),
+        );
+        batch.text(
+            atlas,
+            if self.android_touch.editor { "DONE" } else { "EDIT" },
+            edit[0] - 13.0,
+            edit[1] - 4.0,
+            rgba(255, 255, 255, 255),
+            true,
+        );
+        if self.android_touch.editor {
+            for (name, label) in [("scale_up", "+"), ("scale_down", "-")] {
+                let center = self.android_touch.center(name, size);
+                circle(center, 20.0 * factor, rgba(77, 91, 108, alpha));
+                batch.text(
+                    atlas,
+                    label,
+                    center[0] - 3.0,
+                    center[1] - 5.0,
+                    rgba(255, 255, 255, 255),
+                    true,
+                );
+            }
+            let note = "DRAG BUTTONS TO MOVE  |  +/- SIZE";
+            let width = HudBatch::text_width(atlas, note);
+            batch.text(
+                atlas,
+                note,
+                (batch.width - width) / 2.0,
+                12.0,
+                rgba(255, 255, 255, 230),
+                true,
+            );
+        }
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
+        if self.window.as_ref().is_none_or(|w| w.id() != id) {
+            return;
+        }
+        // Native touch is split between existing menu clicks and the Android
+        // multi-touch game controls. A contact has its own stable finger id.
+        #[cfg(target_os = "android")]
+        if let WindowEvent::Touch { device_id, id: finger, phase, location, .. } = &event {
+            self.android_touch_event(
+                event_loop,
+                id,
+                *device_id,
+                *finger,
+                *phase,
+                [location.x as f32, location.y as f32],
+            );
             return;
         }
         follow_keymap(&mut event);
@@ -13574,6 +14051,7 @@ impl ApplicationHandler for Game<'_> {
                     self.focus_lost = (!focused).then(Instant::now);
                     if !focused && self.control.is_none() {
                         self.keys.clear();
+                        self.android_touch.clear();
                         self.left = false;
                         self.right = false;
                         self.capture(false);
@@ -14602,6 +15080,7 @@ impl<'a> Game<'a> {
                 horizon_client::command::args::GameMode::Survival
             },
             keys: HashSet::new(),
+            android_touch: AndroidTouchControls::load(),
             physical_keys: HashSet::new(),
             physical_buttons: HashSet::new(),
             left: false,
