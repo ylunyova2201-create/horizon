@@ -1,0 +1,94 @@
+name: Android ARM64 APK (experimental)
+
+on:
+  push:
+    branches:
+      - android/native-activity-bootstrap
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and sign experimental ARM64 APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install cargo-apk
+        run: cargo install cargo-apk --locked
+
+      - name: Build native Android package
+        shell: bash
+        run: cargo apk build --package horizon-client --target aarch64-linux-android --release
+
+      - name: Locate and sign APK
+        shell: bash
+        env:
+          SIGNING_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          APK="$(find target -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          mkdir -p dist
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/horizon-ci.jks" \
+            -storepass "$SIGNING_PASSWORD" -keypass "$SIGNING_PASSWORD" \
+            -alias horizon-ci -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=Horizon experimental CI"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$APK" dist/Horizon-Android-arm64-unsigned-aligned.apk
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/horizon-ci.jks" \
+            --ks-key-alias horizon-ci \
+            --ks-pass "pass:$SIGNING_PASSWORD" \
+            --key-pass "pass:$SIGNING_PASSWORD" \
+            --out dist/Horizon-Android-arm64-experimental.apk \
+            dist/Horizon-Android-arm64-unsigned-aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose dist/Horizon-Android-arm64-experimental.apk
+          sha256sum dist/Horizon-Android-arm64-experimental.apk > dist/SHA256SUMS.txt
+          {
+            echo "## Experimental Android APK"
+            echo ""
+            echo "- Target: ARM64 / aarch64-linux-android"
+            echo "- Package: `com.horizonrust.horizon`"
+            echo "- Signature: ephemeral CI key; **not suitable for in-place updates**"
+            echo "- Minecraft Java resources are not included; use legally obtained files."
+            echo "- This is a bring-up build, not a device-tested stable release."
+          } > dist/BUILD-NOTES.md
+
+      - name: Upload APK and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: Horizon-Android-arm64-experimental
+          path: |
+            dist/Horizon-Android-arm64-experimental.apk
+            dist/SHA256SUMS.txt
+            dist/BUILD-NOTES.md
+          if-no-files-found: error
+          retention-days: 14
