@@ -1,5 +1,40 @@
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
+
+/// Main game loop. Public for the Android NativeActivity entry point.
+pub mod game;
+
+/// Native Android entry point used by android-activity through Winit's
+/// android-native-activity backend.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    use std::path::PathBuf;
+
+    let home = app
+        .internal_data_path()
+        .unwrap_or_else(|| PathBuf::from("/data/local/tmp/horizon"));
+    if let Err(error) = std::fs::create_dir_all(&home) {
+        log::error!("Horizon Android: cannot create app data directory: {error}");
+        return;
+    }
+    if let Err(error) = std::env::set_current_dir(&home) {
+        log::error!("Horizon Android: cannot set app data directory: {error}");
+        return;
+    }
+    if let Err(error) = std::fs::create_dir_all(".local/horizon-client/26.3") {
+        log::error!("Horizon Android: cannot create resources directory: {error}");
+        return;
+    }
+
+    horizon_client::telemetry::mark_start();
+    horizon_client::logging::init(&home, "Render thread");
+    log::info!("Horizon Android {}", horizon_client::crash::version());
+    horizon_client::crash::install(home, "client");
+    if let Err(error) = game::run_android(app) {
+        log::error!("Horizon Android: {error}");
+    }
+}
 #![forbid(unsafe_code)]
 pub mod advancements;
 pub mod ambience;
