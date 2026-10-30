@@ -324,6 +324,25 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
+#[cfg(target_os = "android")]
+type AndroidAppHandle = winit::platform::android::activity::AndroidApp;
+#[cfg(not(target_os = "android"))]
+type AndroidAppHandle = ();
+
+/// Build the one Winit event loop used by this client. Android must pass the
+/// Activity handle supplied to android_main; desktop platforms need no handle.
+fn create_event_loop(android_app: &AndroidAppHandle) -> Result<EventLoop<()>, EventLoopError> {
+    let mut builder = EventLoop::builder();
+    #[cfg(target_os = "android")]
+    {
+        use winit::platform::android::EventLoopBuilderExtAndroid;
+        builder.with_android_app(android_app.clone());
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = android_app;
+    builder.build()
+}
+
 #[derive(Clone)]
 struct Options {
     resources: PathBuf,
@@ -15928,8 +15947,11 @@ fn leave_fullscreen_after(
     }
 }
 
-fn run_event_loop(mut game: Game<'_>) -> Result<()> {
-    let result = EventLoop::new()?.run_app(&mut game);
+fn run_event_loop(
+    mut game: Game<'_>,
+    android_app: &AndroidAppHandle,
+) -> Result<()> {
+    let result = create_event_loop(android_app)?.run_app(&mut game);
     leave_fullscreen_after(&result, &mut game.settings);
     result?;
     horizon_client::discord_presence::stop();
@@ -16288,6 +16310,7 @@ fn run_loading(
     vanilla_root: PathBuf,
     pack_error: Option<String>,
     started: Instant,
+    android_app: &AndroidAppHandle,
 ) -> Result<()> {
     let progress = Progress::new();
     let (receiver, loader) =
@@ -16314,7 +16337,7 @@ fn run_loading(
         error: None,
     };
     let mut app = App::Loading(Box::new(loading));
-    let result = EventLoop::new()?.run_app(&mut app);
+    let result = create_event_loop(android_app)?.run_app(&mut app);
     match &mut app {
         App::Ready(game) => leave_fullscreen_after(&result, &mut game.settings),
         App::Loading(loading) => leave_fullscreen_after(&result, &mut loading.settings),
@@ -16337,7 +16360,17 @@ fn run_loading(
     Ok(())
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn run() -> Result<()> {
+    run_with_android_app(())
+}
+
+#[cfg(target_os = "android")]
+pub fn run_android(android_app: AndroidAppHandle) -> Result<()> {
+    run_with_android_app(android_app)
+}
+
+fn run_with_android_app(android_app: AndroidAppHandle) -> Result<()> {
     let Some(mut options) = Options::read()? else {
         return Ok(());
     };
@@ -16390,7 +16423,7 @@ pub fn run() -> Result<()> {
     // shared resources.
     Behaviours::set_cache_dir(std::env::current_dir()?.join(".horizon-cache"));
     if !synchronous_startup(&options) {
-        return run_loading(options, early_settings, vanilla_root, None, started);
+        return run_loading(options, early_settings, vanilla_root, None, started, &android_app);
     }
     let mut pack_error = None;
     options.resources = packs::startup_root(&vanilla_root, &early_settings.resource_packs, &[])
@@ -16436,7 +16469,7 @@ pub fn run() -> Result<()> {
         None,
     )?;
     if let Some(game) = game {
-        run_event_loop(game)?;
+        run_event_loop(game, android_app)?;
     }
     Ok(())
 }
