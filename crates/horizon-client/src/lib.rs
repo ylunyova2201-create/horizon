@@ -7,12 +7,16 @@ pub mod game;
 /// Native Android entry point used by android-activity through Winit's
 /// android-native-activity backend.
 #[cfg(target_os = "android")]
+#[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub fn android_main(app: winit::platform::android::activity::AndroidApp) {
     use std::path::PathBuf;
 
+    // Prefer app-specific external storage so the owner can copy legally
+    // obtained Java game resources into the app's files directory.
     let home = app
-        .internal_data_path()
+        .external_data_path()
+        .or_else(|| app.internal_data_path())
         .unwrap_or_else(|| PathBuf::from("/data/local/tmp/horizon"));
     if let Err(error) = std::fs::create_dir_all(&home) {
         log::error!("Horizon Android: cannot create app data directory: {error}");
@@ -35,7 +39,7 @@ pub fn android_main(app: winit::platform::android::activity::AndroidApp) {
         log::error!("Horizon Android: {error}");
     }
 }
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;
