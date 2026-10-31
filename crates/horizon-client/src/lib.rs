@@ -17,11 +17,12 @@ pub mod game;
 pub fn android_main(app: winit::platform::android::activity::AndroidApp) {
     use std::path::PathBuf;
 
-    // Prefer app-specific external storage so the owner can copy legally
-    // obtained Java game resources into the app's files directory.
+    // Prefer private internal storage: it needs no storage permission and is
+    // available consistently across Android versions. External app-specific
+    // storage is only a fallback if Android cannot provide the internal path.
     let home = app
-        .external_data_path()
-        .or_else(|| app.internal_data_path())
+        .internal_data_path()
+        .or_else(|| app.external_data_path())
         .unwrap_or_else(|| PathBuf::from("/data/local/tmp/horizon"));
     if let Err(error) = std::fs::create_dir_all(&home) {
         log::error!("Horizon Android: cannot create app data directory: {error}");
@@ -30,6 +31,12 @@ pub fn android_main(app: winit::platform::android::activity::AndroidApp) {
     if let Err(error) = std::env::set_current_dir(&home) {
         log::error!("Horizon Android: cannot set app data directory: {error}");
         return;
+    }
+    // Keep logging/crash-report helpers pointed at the same directory used
+    // for saves, options and the Android touch-layout file. This is done
+    // before Horizon starts any worker threads.
+    unsafe {
+        std::env::set_var("HORIZON_HOME", &home);
     }
     if let Err(error) = std::fs::create_dir_all(".local/horizon-client/26.3") {
         log::error!("Horizon Android: cannot create resources directory: {error}");
