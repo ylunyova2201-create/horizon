@@ -641,7 +641,9 @@ impl AndroidTouchControls {
 
 /// Build the one Winit event loop used by this client. Android must pass the
 /// Activity handle supplied to android_main; desktop platforms need no handle.
-fn create_event_loop(android_app: &AndroidAppHandle) -> std::result::Result<EventLoop<()>, EventLoopError> {
+fn create_event_loop(
+    android_app: &AndroidAppHandle,
+) -> std::result::Result<EventLoop<()>, EventLoopError> {
     let mut builder = EventLoop::builder();
     #[cfg(target_os = "android")]
     {
@@ -13924,8 +13926,7 @@ impl ApplicationHandler for Game<'_> {
         // Native touch is split between existing menu clicks and the Android
         // multi-touch game controls. A contact has its own stable finger id.
         #[cfg(target_os = "android")]
-        if let WindowEvent::Touch(touch) = &event
-        {
+        if let WindowEvent::Touch(touch) = &event {
             self.android_touch_event(
                 event_loop,
                 id,
