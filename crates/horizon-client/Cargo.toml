@@ -22,7 +22,28 @@ required-features = ["desktop-bin"]
 
 [package.metadata.android]
 package = "com.horizonrust.horizon"
+apk_name = "Horizon"
 build_targets = ["aarch64-linux-android"]
+resources = "android-res"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[package.metadata.android.application]
+label = "Horizon"
+icon = "@drawable/ic_launcher"
+theme = "@android:style/Theme.Material.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout|uiMode"
+label = "Horizon"
+launch_mode = "singleTop"
+orientation = "landscape"
+exported = true
 
 [dependencies]
 horizon-assets = { path = "../horizon-assets" }
@@ -79,6 +100,9 @@ horizon-dualsense = { path = "../horizon-dualsense", optional = true }
 # HTTPS to the Minecraft services (online-mode session join).
 ureq = { version = "2", default-features = false, features = ["tls"] }
 unicode-bidi = "0.3.18"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22.4"
 
 [target.'cfg(unix)'.dependencies]
 # The server thread's CPU time per tick (`HORIZON_SPIKES`, spans.rs).
