@@ -13744,8 +13744,29 @@ impl Game<'_> {
         let size = [batch.width, batch.height];
         let position = [physical[0] / batch.scale, physical[1] / batch.scale];
 
-        // Menus and the launcher keep Horizon's original click/drag semantics.
+        // A game action can open a menu before the finger is lifted
+        // (inventory/pause). In that case Winit sends the later move/release
+        // through this menu path; release any held gameplay mouse actions and
+        // clear every remaining game contact so no input is stuck or leaked
+        // when the player returns to the world.
         if self.screen != Screen::Playing || self.player.is_none() {
+            if !self.android_touch.contacts.is_empty() {
+                if self.android_touch.pressed(&AndroidTouchTarget::Attack)
+                    && let Err(error) = self.play_mouse(MouseButton::Left, false)
+                {
+                    self.error = Some(error);
+                    event_loop.exit();
+                    return;
+                }
+                if self.android_touch.pressed(&AndroidTouchTarget::Use)
+                    && let Err(error) = self.play_mouse(MouseButton::Right, false)
+                {
+                    self.error = Some(error);
+                    event_loop.exit();
+                    return;
+                }
+                self.android_touch.clear();
+            }
             self.window_event(
                 event_loop,
                 window_id,
@@ -14203,6 +14224,15 @@ impl ApplicationHandler for Game<'_> {
                     self.focused = focused;
                     self.focus_lost = (!focused).then(Instant::now);
                     if !focused && self.control.is_none() {
+                        // Release touch-driven attack/use before discarding
+                        // contacts. Otherwise a background/pause transition
+                        // can leave a held action latched after resume.
+                        if self.android_touch.pressed(&AndroidTouchTarget::Attack) {
+                            self.play_mouse(MouseButton::Left, false)?;
+                        }
+                        if self.android_touch.pressed(&AndroidTouchTarget::Use) {
+                            self.play_mouse(MouseButton::Right, false)?;
+                        }
                         self.keys.clear();
                         self.android_touch.clear();
                         self.left = false;
