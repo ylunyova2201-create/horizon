@@ -13879,26 +13879,41 @@ impl Game<'_> {
         };
 
         let joystick = self.android_touch.center("joystick", size);
-        android_touch_circle(
-            batch,
-            atlas,
-            joystick,
-            59.0 * factor,
-            rgba(25, 35, 46, alpha),
-        );
-        android_touch_circle(
-            batch,
-            atlas,
-            joystick,
-            61.0 * factor,
-            rgba(220, 232, 244, alpha / 2),
-        );
-        let stick = self.android_touch.stick.unwrap_or([0.0, 0.0]);
-        let knob = [
-            joystick[0] + stick[0] * 35.0 * factor,
-            joystick[1] - stick[1] * 35.0 * factor,
-        ];
-        android_touch_circle(batch, atlas, knob, 23.0 * factor, rgba(69, 111, 154, alpha));
+        if self.android_touch.layout.dpad {
+            for (dx, dy, label) in [
+                (0.0, -36.0, "W"),
+                (0.0, 36.0, "S"),
+                (-36.0, 0.0, "A"),
+                (36.0, 0.0, "D"),
+            ] {
+                let center = [joystick[0] + dx * factor, joystick[1] + dy * factor];
+                android_touch_circle(batch, atlas, center, 24.0 * factor, rgba(25, 35, 46, alpha));
+                android_touch_circle(batch, atlas, center, 26.0 * factor, rgba(220, 232, 244, alpha / 2));
+                let width = HudBatch::text_width(atlas, label);
+                batch.text(atlas, label, center[0] - width / 2.0, center[1] - 4.0, rgba(255, 255, 255, 255), true);
+            }
+        } else {
+            android_touch_circle(
+                batch,
+                atlas,
+                joystick,
+                59.0 * factor,
+                rgba(25, 35, 46, alpha),
+            );
+            android_touch_circle(
+                batch,
+                atlas,
+                joystick,
+                61.0 * factor,
+                rgba(220, 232, 244, alpha / 2),
+            );
+            let stick = self.android_touch.stick.unwrap_or([0.0, 0.0]);
+            let knob = [
+                joystick[0] + stick[0] * 35.0 * factor,
+                joystick[1] - stick[1] * 35.0 * factor,
+            ];
+            android_touch_circle(batch, atlas, knob, 23.0 * factor, rgba(69, 111, 154, alpha));
+        }
 
         button(batch, "jump", "JUMP", AndroidTouchTarget::Jump);
         button(batch, "attack", "HIT", AndroidTouchTarget::Attack);
