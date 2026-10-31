@@ -5,10 +5,20 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version = "1.90"
+autobins = false
 description = "Horizon native development client"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
+
+# Keep the desktop executable out of the Android-only APK build. The Android
+# application is the cdylib in src/lib.rs, whose android_main is provided by
+# android-activity through Winit. Requiring this feature prevents Cargo from
+# trying to link a second Android executable with a C main entry point.
+[[bin]]
+name = "horizon-client"
+path = "src/main.rs"
+required-features = ["desktop-bin"]
 
 [package.metadata.android]
 package = "com.horizonrust.horizon"
@@ -92,7 +102,9 @@ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 winresource = "0.1"
 
 [features]
-default = ["audio", "controllers"]
+default = ["audio", "controllers", "desktop-bin"]
+# The desktop launcher executable; Android APK builds use --no-default-features.
+desktop-bin = []
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
 audio = ["horizon-client-render/audio"]
