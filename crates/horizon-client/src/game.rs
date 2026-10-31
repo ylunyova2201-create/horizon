@@ -357,10 +357,15 @@ enum AndroidTouchTarget {
     Use,
     Inventory,
     Perspective,
+    Drop,
+    Pause,
     Hotbar(u8),
     EditToggle,
     ScaleUp,
     ScaleDown,
+    OpacityUp,
+    OpacityDown,
+    ResetLayout,
     MoveButton(String),
 }
 
@@ -463,9 +468,14 @@ impl AndroidTouchControls {
             "sprint" => [0.35, 0.86],
             "inventory" => [0.90, 0.49],
             "perspective" => [0.75, 0.49],
+            "drop" => [0.58, 0.49],
+            "pause" => [0.94, 0.10],
             "edit" => [0.94, 0.10],
             "scale_up" => [0.82, 0.10],
             "scale_down" => [0.70, 0.10],
+            "opacity_up" => [0.58, 0.10],
+            "opacity_down" => [0.46, 0.10],
+            "reset" => [0.34, 0.10],
             _ => [0.5, 0.5],
         };
         self.layout.center(name, defaults, size)
@@ -488,6 +498,15 @@ impl AndroidTouchControls {
             if within("scale_down", 24.0) {
                 return AndroidTouchTarget::ScaleDown;
             }
+            if within("opacity_up", 24.0) {
+                return AndroidTouchTarget::OpacityUp;
+            }
+            if within("opacity_down", 24.0) {
+                return AndroidTouchTarget::OpacityDown;
+            }
+            if within("reset", 27.0) {
+                return AndroidTouchTarget::ResetLayout;
+            }
             for name in [
                 "joystick",
                 "jump",
@@ -497,6 +516,8 @@ impl AndroidTouchControls {
                 "sprint",
                 "inventory",
                 "perspective",
+                "drop",
+                "pause",
             ] {
                 if within(name, 32.0) {
                     return AndroidTouchTarget::MoveButton(name.to_owned());
@@ -522,6 +543,8 @@ impl AndroidTouchControls {
                 ("sprint", AndroidTouchTarget::Sprint),
                 ("inventory", AndroidTouchTarget::Inventory),
                 ("perspective", AndroidTouchTarget::Perspective),
+                ("drop", AndroidTouchTarget::Drop),
+                ("pause", AndroidTouchTarget::Pause),
             ] {
                 if within(name, 29.0) {
                     return target;
@@ -544,6 +567,18 @@ impl AndroidTouchControls {
             }
             AndroidTouchTarget::ScaleDown if self.editor => {
                 self.layout.scale = (self.layout.scale - 0.1).max(0.65);
+                return None;
+            }
+            AndroidTouchTarget::OpacityUp if self.editor => {
+                self.layout.opacity = (self.layout.opacity + 0.05).min(0.95);
+                return None;
+            }
+            AndroidTouchTarget::OpacityDown if self.editor => {
+                self.layout.opacity = (self.layout.opacity - 0.05).max(0.25);
+                return None;
+            }
+            AndroidTouchTarget::ResetLayout if self.editor => {
+                self.layout = AndroidTouchLayout::default();
                 return None;
             }
             _ => {}
@@ -13720,6 +13755,12 @@ impl Game<'_> {
                         AndroidTouchTarget::Perspective => {
                             let _ = self.key_pressed(KeyCode::F5);
                         }
+                        AndroidTouchTarget::Drop => {
+                            let _ = self.key_pressed(KeyCode::KeyQ);
+                        }
+                        AndroidTouchTarget::Pause => {
+                            let _ = self.key_pressed(KeyCode::Escape);
+                        }
                         AndroidTouchTarget::Hotbar(slot) => self.selected = slot as usize,
                         _ => {}
                     }
@@ -13827,6 +13868,8 @@ impl Game<'_> {
             "VIEW",
             AndroidTouchTarget::Perspective,
         );
+        button(batch, "drop", "DROP", AndroidTouchTarget::Drop);
+        button(batch, "pause", "II", AndroidTouchTarget::Pause);
 
         let edit = self.android_touch.center("edit", size);
         android_touch_circle(batch, atlas, edit, 23.0 * factor, rgba(54, 65, 78, alpha));
@@ -13843,7 +13886,13 @@ impl Game<'_> {
             true,
         );
         if self.android_touch.editor {
-            for (name, label) in [("scale_up", "+"), ("scale_down", "-")] {
+            for (name, label) in [
+                ("scale_up", "+"),
+                ("scale_down", "-"),
+                ("opacity_up", "A+"),
+                ("opacity_down", "A-"),
+                ("reset", "RESET"),
+            ] {
                 let center = self.android_touch.center(name, size);
                 android_touch_circle(
                     batch,
@@ -13861,7 +13910,7 @@ impl Game<'_> {
                     true,
                 );
             }
-            let note = "DRAG BUTTONS TO MOVE  |  +/- SIZE";
+            let note = "DRAG BUTTONS  |  +/- SIZE  |  A+/- OPACITY  |  RESET";
             let width = HudBatch::text_width(atlas, note);
             batch.text(
                 atlas,
