@@ -14,6 +14,7 @@ pub mod game;
 /// its window (most commonly because the user's prepared Minecraft files
 /// have not been imported yet).
 #[cfg(target_os = "android")]
+#[allow(unsafe_code)]
 fn show_android_toast(
     app: &winit::platform::android::activity::AndroidApp,
     message: String,
