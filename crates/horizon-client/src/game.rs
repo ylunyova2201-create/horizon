@@ -350,6 +350,10 @@ fn android_touch_circle(
 enum AndroidTouchTarget {
     Joystick,
     Look,
+    MoveForward,
+    MoveBack,
+    MoveLeft,
+    MoveRight,
     Jump,
     Sneak,
     Sprint,
@@ -365,6 +369,7 @@ enum AndroidTouchTarget {
     ScaleDown,
     OpacityUp,
     OpacityDown,
+    DpadToggle,
     ResetLayout,
     MoveButton(String),
 }
@@ -382,6 +387,7 @@ struct AndroidTouchLayout {
     centers: HashMap<String, [f32; 2]>,
     scale: f32,
     opacity: f32,
+    dpad: bool,
 }
 
 impl Default for AndroidTouchLayout {
@@ -390,6 +396,7 @@ impl Default for AndroidTouchLayout {
             centers: HashMap::new(),
             scale: 1.0,
             opacity: 0.72,
+            dpad: false,
         }
     }
 }
@@ -461,6 +468,7 @@ impl AndroidTouchControls {
     fn center(&self, name: &str, size: [f32; 2]) -> [f32; 2] {
         let defaults = match name {
             "joystick" => [0.14, 0.80],
+            "dpad_toggle" => [0.22, 0.10],
             "jump" => [0.90, 0.68],
             "attack" => [0.72, 0.86],
             "use" => [0.90, 0.86],
@@ -507,6 +515,9 @@ impl AndroidTouchControls {
             if within("reset", 27.0) {
                 return AndroidTouchTarget::ResetLayout;
             }
+            if within("dpad_toggle", 27.0) {
+                return AndroidTouchTarget::DpadToggle;
+            }
             for name in [
                 "joystick",
                 "jump",
@@ -532,7 +543,24 @@ impl AndroidTouchControls {
                     .clamp(0.0, 8.0) as u8;
                 return AndroidTouchTarget::Hotbar(slot);
             }
-            if p[0] < size[0] * 0.34 && p[1] > size[1] * 0.52 {
+            if self.layout.dpad && p[0] < size[0] * 0.34 && p[1] > size[1] * 0.52 {
+                let c = self.center("joystick", size);
+                let offset = 36.0 * scale;
+                for (dx, dy, target) in [
+                    (0.0, -offset, AndroidTouchTarget::MoveForward),
+                    (0.0, offset, AndroidTouchTarget::MoveBack),
+                    (-offset, 0.0, AndroidTouchTarget::MoveLeft),
+                    (offset, 0.0, AndroidTouchTarget::MoveRight),
+                ] {
+                    if (p[0] - (c[0] + dx)).powi(2) + (p[1] - (c[1] + dy)).powi(2)
+                        <= (24.0 * scale).powi(2)
+                    {
+                        return target;
+                    }
+                }
+                return AndroidTouchTarget::Joystick;
+            }
+            if !self.layout.dpad && p[0] < size[0] * 0.34 && p[1] > size[1] * 0.52 {
                 return AndroidTouchTarget::Joystick;
             }
             for (name, target) in [
@@ -575,6 +603,10 @@ impl AndroidTouchControls {
             }
             AndroidTouchTarget::OpacityDown if self.editor => {
                 self.layout.opacity = (self.layout.opacity - 0.05).max(0.25);
+                return None;
+            }
+            AndroidTouchTarget::DpadToggle if self.editor => {
+                self.layout.dpad = !self.layout.dpad;
                 return None;
             }
             AndroidTouchTarget::ResetLayout if self.editor => {
@@ -648,6 +680,18 @@ impl AndroidTouchControls {
                     self.stick = Some([x, y]);
                 }
                 AndroidTouchTarget::Look => self.look_active = true,
+                AndroidTouchTarget::MoveForward => {
+                    self.keys.insert(KeyCode::KeyW);
+                }
+                AndroidTouchTarget::MoveBack => {
+                    self.keys.insert(KeyCode::KeyS);
+                }
+                AndroidTouchTarget::MoveLeft => {
+                    self.keys.insert(KeyCode::KeyA);
+                }
+                AndroidTouchTarget::MoveRight => {
+                    self.keys.insert(KeyCode::KeyD);
+                }
                 AndroidTouchTarget::Jump => {
                     self.keys.insert(KeyCode::Space);
                 }
@@ -13891,6 +13935,7 @@ impl Game<'_> {
                 ("scale_down", "-"),
                 ("opacity_up", "A+"),
                 ("opacity_down", "A-"),
+                ("dpad_toggle", if self.android_touch.layout.dpad { "PAD" } else { "JOY" }),
                 ("reset", "RESET"),
             ] {
                 let center = self.android_touch.center(name, size);
@@ -13910,7 +13955,7 @@ impl Game<'_> {
                     true,
                 );
             }
-            let note = "DRAG BUTTONS  |  +/- SIZE  |  A+/- OPACITY  |  RESET";
+            let note = "DRAG BUTTONS  |  +/- SIZE  |  A+/- OPACITY  |  PAD/JOY  |  RESET";
             let width = HudBatch::text_width(atlas, note);
             batch.text(
                 atlas,
