@@ -1,5 +1,5 @@
 //! Horizon: native Rust client for Minecraft Java Edition 26.3 gameplay.
-#![forbid(unsafe_code)]
+#![deny(unsafe_op_in_unsafe_fn)]
 mod game;
 
 use horizon_client::{crash, logging};
@@ -39,6 +39,25 @@ fn main() {
             eprintln!("Press Enter to close.");
             let _ = std::io::stdin().read_line(&mut String::new());
         }
+        std::process::exit(1);
+    }
+    logging::flush();
+}
+
+
+/// NativeActivity entry point used by cargo-apk on Android.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    horizon_client::telemetry::mark_start();
+    let home = logging::game_home();
+    logging::init(&home, "Render thread");
+    log::info!("Horizon {} (Android)", crash::version());
+    crash::install(home.clone(), "client");
+    if let Err(error) = game::run_android(app) {
+        log::error!("Horizon Android: {error}");
+        crash::report_error(&home, "client", &*error);
+        logging::flush();
         std::process::exit(1);
     }
     logging::flush();
