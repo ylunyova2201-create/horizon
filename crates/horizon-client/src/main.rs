@@ -1,3 +1,4 @@
+#![cfg_attr(target_os = "android", no_main)]
 //! Horizon: native Rust client for Minecraft Java Edition 26.3 gameplay.
 #![deny(unsafe_op_in_unsafe_fn)]
 mod game;
