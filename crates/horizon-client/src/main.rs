@@ -50,8 +50,26 @@ fn main() {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    // Android does not promise a useful process working directory. Keep all
+    // user data (resources, saves, options and touch layout) in this app's
+    // private files directory, which survives app restarts and updates.
+    let home = app.internal_data_path().unwrap_or_else(logging::game_home);
+    if let Err(error) = std::fs::create_dir_all(&home)
+        .and_then(|_| std::env::set_current_dir(&home))
+    {
+        eprintln!(
+            "Horizon: could not prepare private app data directory {}: {error}",
+            home.display()
+        );
+        return;
+    }
+    // Other parts of the client resolve logs and crash reports through this
+    // variable. Set it before starting Horizon's worker threads.
+    unsafe {
+        std::env::set_var("HORIZON_HOME", &home);
+    }
+
     horizon_client::telemetry::mark_start();
-    let home = logging::game_home();
     logging::init(&home, "Render thread");
     log::info!("Horizon {} (Android)", crash::version());
     crash::install(home.clone(), "client");
