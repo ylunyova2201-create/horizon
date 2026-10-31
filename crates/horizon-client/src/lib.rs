@@ -1,6 +1,108 @@
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
-#![forbid(unsafe_code)]
+
+#![deny(unsafe_code)]
+
+// The client modules refer to their owning crate by its Cargo library name.
+extern crate self as horizon_client;
+
+/// Main game loop. Public for the Android NativeActivity entry point.
+pub mod game;
+
+
+/// Show a native Android message when startup fails before Winit can create
+/// its window (most commonly because the user's prepared Minecraft files
+/// have not been imported yet).
+#[cfg(target_os = "android")]
+#[allow(unsafe_code)]
+fn show_android_toast(
+    app: &winit::platform::android::activity::AndroidApp,
+    message: String,
+) {
+    let app = app.clone();
+    app.run_on_java_main_thread(Box::new(move || {
+        use jni::{
+            objects::{JObject, JValue},
+            vm::JavaVM,
+        };
+
+        let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
+        let result = vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+            // activity_as_ptr() is a borrowed global reference owned by AndroidApp.
+            let activity = unsafe {
+                JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject)
+            };
+            let message = JObject::from(env.new_string(message)?);
+            let toast = env
+                .call_static_method(
+                    "android/widget/Toast",
+                    "makeText",
+                    "(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;",
+                    &[
+                        JValue::Object(&activity),
+                        JValue::Object(&message),
+                        JValue::Int(1),
+                    ],
+                )?
+                .l()?;
+            env.call_method(&toast, "show", "()V", &[])?;
+            Ok(())
+        });
+        if let Err(error) = result {
+            log::error!("Horizon Android: could not show startup message: {error}");
+        }
+    }));
+}
+
+/// Native Android entry point used by android-activity through Winit's
+/// android-native-activity backend.
+#[cfg(target_os = "android")]
+#[allow(unsafe_code)]
+#[unsafe(no_mangle)]
+pub fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    use std::path::PathBuf;
+
+    // Prefer private internal storage: it needs no storage permission and is
+    // available consistently across Android versions. External app-specific
+    // storage is only a fallback if Android cannot provide the internal path.
+    let home = app
+        .internal_data_path()
+        .or_else(|| app.external_data_path())
+        .unwrap_or_else(|| PathBuf::from("/data/local/tmp/horizon"));
+    if let Err(error) = std::fs::create_dir_all(&home) {
+        log::error!("Horizon Android: cannot create app data directory: {error}");
+        return;
+    }
+    if let Err(error) = std::env::set_current_dir(&home) {
+        log::error!("Horizon Android: cannot set app data directory: {error}");
+        return;
+    }
+    // Keep logging/crash-report helpers pointed at the same directory used
+    // for saves, options and the Android touch-layout file. This is done
+    // before Horizon starts any worker threads.
+    unsafe {
+        std::env::set_var("HORIZON_HOME", &home);
+    }
+    if let Err(error) = std::fs::create_dir_all(".local/horizon-client/26.3") {
+        log::error!("Horizon Android: cannot create resources directory: {error}");
+        return;
+    }
+
+    horizon_client::telemetry::mark_start();
+    horizon_client::logging::init(&home, "Render thread");
+    log::info!("Horizon Android {}", horizon_client::crash::version());
+    horizon_client::crash::install(home, "client");
+    if let Err(error) = game::run_android(app.clone()) {
+        log::error!("Horizon Android: {error}");
+        let message = if error.to_string().contains("horizon-resources.json") {
+            "Horizon needs prepared Minecraft 26.3 game files. This APK is currently the game client; the Android launcher and resource import screen are not ported yet.".to_owned()
+        } else {
+            format!("Horizon could not start: {error}")
+        };
+        show_android_toast(&app, message);
+        horizon_client::logging::flush();
+    }
+}
 pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;

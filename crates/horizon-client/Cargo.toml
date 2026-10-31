@@ -5,7 +5,45 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version = "1.90"
+autobins = false
 description = "Horizon native development client"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+# Keep the desktop executable out of the Android-only APK build. The Android
+# application is the cdylib in src/lib.rs, whose android_main is provided by
+# android-activity through Winit. Requiring this feature prevents Cargo from
+# trying to link a second Android executable with a C main entry point.
+[[bin]]
+name = "horizon-client"
+path = "src/main.rs"
+required-features = ["desktop-bin"]
+
+[package.metadata.android]
+package = "com.horizonrust.horizon"
+apk_name = "Horizon"
+build_targets = ["aarch64-linux-android"]
+resources = "android-res"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[package.metadata.android.application]
+label = "Horizon"
+icon = "@drawable/ic_launcher"
+theme = "@android:style/Theme.Material.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout|uiMode"
+label = "Horizon"
+launch_mode = "singleTop"
+orientation = "landscape"
+exported = true
 
 [dependencies]
 horizon-assets = { path = "../horizon-assets" }
@@ -31,7 +69,7 @@ horizon-friends = { path = "../horizon-friends" }
 # Their runtime is the `mods` feature.
 horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
-winit = "0.30.13"
+winit = { version = "0.30.13", features = ["android-native-activity"] }
 pollster = "0.4"
 bytemuck = { version = "1.24", features = ["derive"] }
 glam = "0.30"
@@ -63,6 +101,9 @@ horizon-dualsense = { path = "../horizon-dualsense", optional = true }
 ureq = { version = "2", default-features = false, features = ["tls"] }
 unicode-bidi = "0.3.18"
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22.4"
+
 [target.'cfg(unix)'.dependencies]
 # The server thread's CPU time per tick (`HORIZON_SPIKES`, spans.rs).
 rustix = { version = "1", default-features = false, features = ["std", "time"] }
@@ -85,7 +126,9 @@ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 winresource = "0.1"
 
 [features]
-default = ["audio", "controllers"]
+default = ["audio", "controllers", "desktop-bin"]
+# The desktop launcher executable; Android APK builds use --no-default-features.
+desktop-bin = []
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
 audio = ["horizon-client-render/audio"]

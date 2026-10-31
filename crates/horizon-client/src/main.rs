@@ -1,5 +1,6 @@
+#![cfg_attr(target_os = "android", no_main)]
 //! Horizon: native Rust client for Minecraft Java Edition 26.3 gameplay.
-#![forbid(unsafe_code)]
+#![deny(unsafe_op_in_unsafe_fn)]
 mod game;
 
 use horizon_client::{crash, logging};
@@ -9,6 +10,7 @@ use horizon_client::{crash, logging};
 /// reads it, so the linker keeps it.
 static MOD_API_LEVEL: [u8; 27] = horizon_mods::api_level::MARK;
 
+#[cfg(not(target_os = "android"))]
 fn main() {
     std::hint::black_box(&MOD_API_LEVEL);
     horizon_client::telemetry::mark_start();
@@ -39,6 +41,43 @@ fn main() {
             eprintln!("Press Enter to close.");
             let _ = std::io::stdin().read_line(&mut String::new());
         }
+        std::process::exit(1);
+    }
+    logging::flush();
+}
+
+
+/// NativeActivity entry point used by cargo-apk on Android.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    // Android does not promise a useful process working directory. Keep all
+    // user data (resources, saves, options and touch layout) in this app's
+    // private files directory, which survives app restarts and updates.
+    let home = app.internal_data_path().unwrap_or_else(logging::game_home);
+    if let Err(error) = std::fs::create_dir_all(&home)
+        .and_then(|_| std::env::set_current_dir(&home))
+    {
+        eprintln!(
+            "Horizon: could not prepare private app data directory {}: {error}",
+            home.display()
+        );
+        return;
+    }
+    // Other parts of the client resolve logs and crash reports through this
+    // variable. Set it before starting Horizon's worker threads.
+    unsafe {
+        std::env::set_var("HORIZON_HOME", &home);
+    }
+
+    horizon_client::telemetry::mark_start();
+    logging::init(&home, "Render thread");
+    log::info!("Horizon {} (Android)", crash::version());
+    crash::install(home.clone(), "client");
+    if let Err(error) = game::run_android(app) {
+        log::error!("Horizon Android: {error}");
+        crash::report_error(&home, "client", &*error);
+        logging::flush();
         std::process::exit(1);
     }
     logging::flush();
