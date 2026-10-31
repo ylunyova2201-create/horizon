@@ -80,6 +80,7 @@ jobs:
             echo "- Target: ARM64 / aarch64-linux-android"
             echo "- Package: `com.horizonrust.horizon`"
             echo "- Signature: ephemeral CI key; **not suitable for in-place updates**"
+            echo "- Audio is disabled in this bootstrap build; Android audio linking is not validated."
             echo "- Minecraft Java resources are not included; use legally obtained files."
             echo "- This is a bring-up build, not a device-tested stable release."
           } > dist/BUILD-NOTES.md
