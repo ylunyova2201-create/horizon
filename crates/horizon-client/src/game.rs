@@ -469,7 +469,7 @@ impl AndroidTouchControls {
             "inventory" => [0.90, 0.49],
             "perspective" => [0.75, 0.49],
             "drop" => [0.58, 0.49],
-            "pause" => [0.94, 0.10],
+            "pause" => [0.94, 0.20],
             "edit" => [0.94, 0.10],
             "scale_up" => [0.82, 0.10],
             "scale_down" => [0.70, 0.10],
