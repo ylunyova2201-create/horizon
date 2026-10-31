@@ -9,6 +9,7 @@ use horizon_client::{crash, logging};
 /// reads it, so the linker keeps it.
 static MOD_API_LEVEL: [u8; 27] = horizon_mods::api_level::MARK;
 
+#[cfg(not(target_os = "android"))]
 fn main() {
     std::hint::black_box(&MOD_API_LEVEL);
     horizon_client::telemetry::mark_start();
